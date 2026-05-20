@@ -17,7 +17,9 @@ to any RTLS + MES stack with an HTTP-callable backend.
 
 | Piece | Where | What it does |
 |---|---|---|
-| **n8n workflow — zero paid APIs** | [`ops/n8n/workflow.free.json`](ops/n8n/workflow.free.json) | **Recommended for first-time / zero-budget deployments.** Groq (free LLM) + Ollama embeddings (local) + Redis vector + Postgres. 10 credentials to create. See [`ops/n8n/FREE-STACK.md`](ops/n8n/FREE-STACK.md). |
+| **n8n workflow — zero paid APIs** | [`ops/n8n/workflow.free.json`](ops/n8n/workflow.free.json) | **Recommended for first-time / zero-budget deployments.** Groq (free LLM) + Ollama embeddings (local) + Redis vector + Pinecone free tier + Postgres. 11 credentials. See [`ops/n8n/FREE-STACK.md`](ops/n8n/FREE-STACK.md). |
+| **CAPA Generation subworkflow** | [`ops/n8n/workflow.capa.json`](ops/n8n/workflow.capa.json) | Standalone webhook-triggered AI subworkflow: incident → CAPA → Postgres + Slack + email. See [`ops/n8n/CAPA-SHIFT-GUIDE.md`](ops/n8n/CAPA-SHIFT-GUIDE.md). |
+| **Shift Intelligence subworkflow** | [`ops/n8n/workflow.shift.json`](ops/n8n/workflow.shift.json) | Schedule-triggered (7/15/23 IST) AI-written shift report. Same guide. |
 | **n8n workflow — paid APIs** | [`ops/n8n/workflow.publish-ready.json`](ops/n8n/workflow.publish-ready.json) | Phase-3 hardening + credential stubs for the original OpenAI + Anthropic + Pinecone + Perplexity stack. 12 credentials. See [`ops/n8n/PUBLISH-READY.md`](ops/n8n/PUBLISH-READY.md). |
 | **n8n workflow (no creds)** | [`ops/n8n/workflow.phase3.json`](ops/n8n/workflow.phase3.json) | Bare workflow without any credential stubs — for n8n instances that already have unrelated credentials |
 | **Docker stack** | [`docker-compose.yml`](docker-compose.yml) + [`docker/`](docker/) | Postgres + Redis + n8n + Prometheus + Grafana + Loki + Promtail + Ollama. One `docker compose up -d` |
