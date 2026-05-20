@@ -1,0 +1,202 @@
+x-healthcheck-defaults: &healthcheck
+  interval: 15s
+  timeout: 5s
+  retries: 5
+  start_period: 25s
+
+x-restart: &restart
+  restart: unless-stopped
+
+networks:
+  mes_plus:
+    name: mes_plus
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  n8n_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  ollama_data:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mes-postgres
+    <<: *restart
+    networks: [mes_plus]
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-mes}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme-in-env}"
+      POSTGRES_DB: "${POSTGRES_DB:-mes_incidents}"
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+
+  redis:
+    image: redis:7-alpine
+    container_name: mes-redis
+    <<: *restart
+    networks: [mes_plus]
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "redis-cli", "ping"]
+
+  n8n:
+    image: n8nio/n8n:1.71.3
+    container_name: mes-n8n
+    <<: *restart
+    networks: [mes_plus]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: "${POSTGRES_USER:-mes}"
+      DB_POSTGRESDB_PASSWORD: "${POSTGRES_PASSWORD:-changeme-in-env}"
+      EXECUTIONS_MODE: regular
+      N8N_HOST: "${N8N_HOST:-localhost}"
+      N8N_PORT: 5678
+      N8N_PROTOCOL: "${N8N_PROTOCOL:-http}"
+      WEBHOOK_URL: "${N8N_WEBHOOK_URL:-http://localhost:5678/}"
+      GENERIC_TIMEZONE: "${TZ:-Asia/Kolkata}"
+      TZ: "${TZ:-Asia/Kolkata}"
+      N8N_METRICS: "true"
+      N8N_LOG_LEVEL: "${N8N_LOG_LEVEL:-info}"
+      N8N_LOG_OUTPUT: "console"
+      N8N_ENCRYPTION_KEY: "${N8N_ENCRYPTION_KEY:-}"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_RUNNERS_ENABLED: "true"
+    # Make the host's MES backend reachable as `host.docker.internal:8000`
+    # (default in MES_API_BASE). On Linux hosts add a host-gateway alias.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./docker/n8n:/data/shared
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz >/dev/null 2>&1 || exit 1"]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: mes-prometheus
+    <<: *restart
+    networks: [mes_plus]
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy >/dev/null 2>&1 || exit 1"]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: mes-grafana
+    <<: *restart
+    networks: [mes_plus]
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "${GRAFANA_ANON_VIEWER:-false}"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_SERVER_ROOT_URL: "${GRAFANA_ROOT_URL:-http://localhost:3001/}"
+      POSTGRES_USER: "${POSTGRES_USER:-mes}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme-in-env}"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null 2>&1 || exit 1"]
+
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: mes-loki
+    <<: *restart
+    networks: [mes_plus]
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ./docker/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3100/ready >/dev/null 2>&1 || exit 1"]
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: mes-promtail
+    <<: *restart
+    networks: [mes_plus]
+    depends_on:
+      loki:
+        condition: service_healthy
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
+    volumes:
+      - ./docker/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  ollama:
+    image: ollama/ollama:0.4.4
+    container_name: mes-ollama
+    <<: *restart
+    networks: [mes_plus]
+    profiles: ["ai-local"]
+    environment:
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-5m}"
+      OLLAMA_HOST: "0.0.0.0:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    # Uncomment for NVIDIA GPU passthrough. Requires nvidia-container-toolkit
+    # on the host. Leave commented for CPU-only deploys.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]

@@ -1,0 +1,51 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    factory: ${FACTORY_ID:-factory-default}
+    env: ${DEPLOYMENT_ENV:-production}
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8000"]
+        labels:
+          service: rtls-backend
+
+  - job_name: n8n
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["n8n:5678"]
+        labels:
+          service: n8n
+    # n8n only exposes /metrics when N8N_METRICS=true (set in compose env_file).
+    # The job stays healthy as "down" until that flag is enabled — Prometheus
+    # itself doesn't error, and we surface "n8n metrics unavailable" via Grafana.
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+        labels:
+          service: postgres
+    # Exporter is optional — add a postgres-exporter container later if you
+    # want full Postgres metrics. Job stays down without it; safe to leave.
+
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+        labels:
+          service: redis
+    # Same pattern: optional exporter.
+
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          service: host
+    # Optional node-exporter for host CPU/RAM/disk metrics.

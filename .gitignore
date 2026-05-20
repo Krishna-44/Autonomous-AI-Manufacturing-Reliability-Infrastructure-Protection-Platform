@@ -1,0 +1,39 @@
+# Local env / secrets
+.env
+*.env.local
+
+# macOS resource-fork files
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+
+# Python
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+**/venv/
+
+# Runtime logs + artifacts
+*.log
+.smoke-health.json
+.pip-install.log
+
+# Docker runtime data — volumes hold the real data; these are mount points
+docker/grafana/dashboards/*.json.tmp
+docker/n8n/data/
+docker/ollama/data/
+
+# Node (in case any frontend lands later)
+node_modules/
+.next/
+
+# IDE / local agent state
+.idea/
+.vscode/
+.claude/
+.playwright-mcp/
