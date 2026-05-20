@@ -17,8 +17,9 @@ to any RTLS + MES stack with an HTTP-callable backend.
 
 | Piece | Where | What it does |
 |---|---|---|
-| **n8n workflow** (113 nodes) | [`ops/n8n/workflow.publish-ready.json`](ops/n8n/workflow.publish-ready.json) | **Recommended import.** Phase-3 hardening + 50 credential stubs pre-attached so the publish button is one click away |
-| **n8n workflow (no creds)** | [`ops/n8n/workflow.phase3.json`](ops/n8n/workflow.phase3.json) | Same workflow without credential stubs — useful for fresh n8n instances that already have unrelated credentials |
+| **n8n workflow — zero paid APIs** | [`ops/n8n/workflow.free.json`](ops/n8n/workflow.free.json) | **Recommended for first-time / zero-budget deployments.** Groq (free LLM) + Ollama embeddings (local) + Redis vector + Postgres. 10 credentials to create. See [`ops/n8n/FREE-STACK.md`](ops/n8n/FREE-STACK.md). |
+| **n8n workflow — paid APIs** | [`ops/n8n/workflow.publish-ready.json`](ops/n8n/workflow.publish-ready.json) | Phase-3 hardening + credential stubs for the original OpenAI + Anthropic + Pinecone + Perplexity stack. 12 credentials. See [`ops/n8n/PUBLISH-READY.md`](ops/n8n/PUBLISH-READY.md). |
+| **n8n workflow (no creds)** | [`ops/n8n/workflow.phase3.json`](ops/n8n/workflow.phase3.json) | Bare workflow without any credential stubs — for n8n instances that already have unrelated credentials |
 | **Docker stack** | [`docker-compose.yml`](docker-compose.yml) + [`docker/`](docker/) | Postgres + Redis + n8n + Prometheus + Grafana + Loki + Promtail + Ollama. One `docker compose up -d` |
 | **Backend recovery patch** | [`backend-patch/`](backend-patch/) | Drop-in FastAPI module: `/admin/recovery/*` routes + idempotency + circuit breaker. Mock-safe by default |
 | **Architecture diagrams** | [`ops/ARCHITECTURE.md`](ops/ARCHITECTURE.md) | Mermaid: system, sequence, data-flow, credential matrix, failure-domain isolation |
