@@ -168,3 +168,120 @@ CREATE INDEX IF NOT EXISTS video_inspections_camera_idx   ON video_inspections (
 CREATE INDEX IF NOT EXISTS video_inspections_verdict_idx  ON video_inspections (verdict);
 CREATE INDEX IF NOT EXISTS video_inspections_inspected_idx ON video_inspections (inspected_at DESC);
 CREATE INDEX IF NOT EXISTS video_inspections_cycle_idx    ON video_inspections (cycle_id);
+
+-- ============================================================================
+-- Phase 5 — additional AI features
+-- ============================================================================
+
+-- Why-Machine-Failed Explainer — plain-language failure narratives generated
+-- by the LLM after an incident is triaged. One row per (incident, explanation).
+CREATE TABLE IF NOT EXISTS failure_explanations (
+    id                  BIGSERIAL PRIMARY KEY,
+    incident_id         BIGINT REFERENCES incidents(id) ON DELETE SET NULL,
+    narrative           TEXT,
+    factors             JSONB,    -- [{factor, weight, evidence}]
+    confidence          NUMERIC,  -- 0..1
+    suggested_action    TEXT,
+    raw_agent_output    JSONB,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS failure_explanations_incident_idx ON failure_explanations (incident_id);
+CREATE INDEX IF NOT EXISTS failure_explanations_created_idx  ON failure_explanations (created_at DESC);
+
+-- Production cycle stream (one row per finished cycle per station) — feeds
+-- the Bottleneck Detector. Populated by the MES line collector; here as
+-- schema only so the workflow has somewhere to query against.
+CREATE TABLE IF NOT EXISTS production_cycles (
+    id              BIGSERIAL PRIMARY KEY,
+    station_id      TEXT,
+    cycle_id        TEXT,
+    start_at        TIMESTAMPTZ,
+    end_at          TIMESTAMPTZ,
+    cycle_time_s    NUMERIC,
+    parts_produced  INTEGER DEFAULT 1,
+    ng_count        INTEGER DEFAULT 0,
+    operator_id     TEXT,
+    shift_id        TEXT
+);
+CREATE INDEX IF NOT EXISTS production_cycles_station_idx ON production_cycles (station_id);
+CREATE INDEX IF NOT EXISTS production_cycles_start_idx   ON production_cycles (start_at DESC);
+CREATE INDEX IF NOT EXISTS production_cycles_shift_idx   ON production_cycles (shift_id);
+
+-- Bottleneck analyses — AI-identified slowest stations + loss projections.
+CREATE TABLE IF NOT EXISTS bottleneck_analyses (
+    id                       BIGSERIAL PRIMARY KEY,
+    window_start             TIMESTAMPTZ NOT NULL,
+    window_end               TIMESTAMPTZ NOT NULL,
+    slowest_station          TEXT,
+    bottleneck_factor        TEXT,             -- 'hydraulic_lag', 'operator_idle', etc.
+    impact_summary           TEXT,
+    projected_loss_parts     NUMERIC,
+    projected_loss_currency  NUMERIC,
+    confidence               NUMERIC,
+    recommendations          JSONB,            -- [{priority, action}]
+    raw_agent_output         JSONB,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS bottleneck_analyses_window_idx ON bottleneck_analyses (window_end DESC);
+
+-- Knowledge engine Q&A log — every operator query + AI answer + sources.
+CREATE TABLE IF NOT EXISTS knowledge_qa (
+    id           BIGSERIAL PRIMARY KEY,
+    user_id      TEXT,
+    question     TEXT,
+    answer       TEXT,
+    sources      JSONB,             -- list of incident_ids / capa_ids retrieved
+    confidence   NUMERIC,
+    feedback     INTEGER,           -- -1, 0, +1 thumbs
+    asked_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS knowledge_qa_asked_idx ON knowledge_qa (asked_at DESC);
+CREATE INDEX IF NOT EXISTS knowledge_qa_user_idx  ON knowledge_qa (user_id);
+
+-- Spare part consumption history — populated each time maintenance burns a
+-- spare part. Feeds the Spare Part Forecaster.
+CREATE TABLE IF NOT EXISTS spare_parts_consumption (
+    id           BIGSERIAL PRIMARY KEY,
+    part_id      TEXT,
+    part_name    TEXT,
+    machine_id   TEXT,
+    consumed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    quantity     INTEGER DEFAULT 1,
+    reason       TEXT,                -- 'breakdown' | 'preventive' | 'restock'
+    incident_id  BIGINT REFERENCES incidents(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS spare_parts_consumption_part_idx     ON spare_parts_consumption (part_id);
+CREATE INDEX IF NOT EXISTS spare_parts_consumption_consumed_idx ON spare_parts_consumption (consumed_at DESC);
+CREATE INDEX IF NOT EXISTS spare_parts_consumption_machine_idx  ON spare_parts_consumption (machine_id);
+
+-- Spare-part failure forecasts — AI predictions of which parts fail next.
+CREATE TABLE IF NOT EXISTS spare_forecasts (
+    id                      BIGSERIAL PRIMARY KEY,
+    part_id                 TEXT,
+    part_name               TEXT,
+    machine_id              TEXT,
+    predicted_failure_date  DATE,
+    days_until_failure      INTEGER,
+    confidence              NUMERIC,
+    reasoning               TEXT,
+    recommended_action      TEXT,
+    raw_agent_output        JSONB,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS spare_forecasts_created_idx ON spare_forecasts (created_at DESC);
+CREATE INDEX IF NOT EXISTS spare_forecasts_part_idx    ON spare_forecasts (part_id);
+
+-- Auto-created procurement requests (top picks from spare_forecasts).
+CREATE TABLE IF NOT EXISTS procurement_requests (
+    id           BIGSERIAL PRIMARY KEY,
+    part_id      TEXT,
+    part_name    TEXT,
+    quantity     INTEGER,
+    urgency      TEXT,                                            -- 'critical' | 'high' | 'normal'
+    reason       TEXT,
+    forecast_id  BIGINT REFERENCES spare_forecasts(id) ON DELETE SET NULL,
+    status       TEXT DEFAULT 'pending',                          -- 'pending' | 'approved' | 'ordered' | 'received'
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS procurement_requests_status_idx  ON procurement_requests (status);
+CREATE INDEX IF NOT EXISTS procurement_requests_urgency_idx ON procurement_requests (urgency);
